@@ -58,29 +58,13 @@ except ImportError as e:
 # Initialize Flask app
 app = Flask(__name__)
 
-# CORS Configuration - Allow frontend domains
-def is_allowed_origin(origin):
-    """Check if origin is allowed"""
-    if not origin:
-        return False
-    
-    allowed_patterns = [
-        "http://localhost:3000",
-        "http://localhost:5173",
-        ".onrender.com",
-        ".vercel.app",
-    ]
-    
-    for pattern in allowed_patterns:
-        if pattern in origin or origin == pattern:
-            return True
-    return False
-
+# CORS Configuration - Allow all Render domains dynamically
 CORS(app, 
-     origins=is_allowed_origin,
+     resources={r"/*": {"origins": "*"}},
      allow_headers=["Content-Type", "Authorization"],
+     expose_headers=["Content-Type", "Authorization"],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-     supports_credentials=True)
+     supports_credentials=False)
 
 # JWT Configuration
 app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'your-secret-key-change-in-production')
@@ -356,13 +340,17 @@ def reset_source():
 @app.route("/health")
 def health_check():
     """Health check endpoint"""
-    return jsonify({
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "geofence_enabled": GEOFENCE_ENABLED,
-        "real_data_enabled": REAL_DATA_ENABLED,
-        "data_mode": "REAL_DETECTIONS" if REAL_DATA_ENABLED else "MOCK_DATA"
-    })
+    try:
+        return jsonify({
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "geofence_enabled": GEOFENCE_ENABLED,
+            "real_data_enabled": REAL_DATA_ENABLED,
+            "data_mode": "REAL_DETECTIONS" if REAL_DATA_ENABLED else "MOCK_DATA"
+        })
+    except Exception as e:
+        logger.error(f"Health check error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route("/api")
@@ -1442,12 +1430,9 @@ def main():
         except Exception as e:
             logger.error(f"❌ Failed to initialize authentication: {e}")
     
-    # Initialize inference on startup
-    try:
-        get_inference()
-    except Exception as e:
-        logger.warning(f"⚠️ Could not initialize inference on startup: {e}")
-        logger.info("   Inference will be initialized on first request")
+    # Skip inference initialization on startup for production deployment
+    # Inference will be lazily initialized on first request if needed
+    logger.info("⏭️ Skipping inference initialization - will initialize on demand")
     
     # Run Flask server
     app.run(
