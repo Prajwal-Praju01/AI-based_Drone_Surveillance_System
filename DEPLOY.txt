@@ -1,0 +1,22 @@
+# Deploy to Render
+
+## Quick Steps:
+
+1. Push to GitHub:
+```bash
+git add .
+git commit -m "Deploy to Render"
+git push origin main
+```
+
+2. Deploy on Render:
+   - Go to https://render.com/
+   - Click "New" → "Blueprint"
+   - Select your repository
+   - Click "Apply"
+
+3. Done! Wait 5-10 minutes for deployment.
+
+Your URLs:
+- Backend: https://drone-surveillance-backend.onrender.com
+- Frontend: https://drone-surveillance-frontend.onrender.com

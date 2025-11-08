@@ -2,6 +2,16 @@
 
 Complete end-to-end AI-powered drone surveillance system with YOLOv8 object detection, DeepSORT tracking, and real-time monitoring dashboard.
 
+## 🚀 Quick Deploy to Render
+
+1. Push this repo to GitHub
+2. Go to https://render.com/
+3. Click "New" → "Blueprint"
+4. Select your repository
+5. Click "Apply"
+
+Done! Both backend and frontend will deploy automatically.
+
 ## 🌟 Overview
 
 This project implements a production-ready drone surveillance system with:

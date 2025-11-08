@@ -57,10 +57,23 @@ except ImportError as e:
 
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app)  # Enable CORS for React frontend
+
+# CORS Configuration - Allow frontend domains
+CORS(app, resources={
+    r"/*": {
+        "origins": [
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "https://*.onrender.com",  # Render deployment
+            "https://*.vercel.app",    # Vercel deployment
+        ],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    }
+})
 
 # JWT Configuration
-app.config['JWT_SECRET_KEY'] = 'your-secret-key-change-in-production'  # Change in production!
+app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'your-secret-key-change-in-production')
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
 app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=30)
 jwt = JWTManager(app)
@@ -1400,9 +1413,13 @@ def internal_error(error):
 
 def main():
     """Run Flask server"""
+    # Use PORT from environment (for Render/Heroku) or default
+    port = int(os.environ.get("PORT", SERVER_CONFIG["port"]))
+    host = os.environ.get("HOST", SERVER_CONFIG["host"])
+    
     print("🚁 AI-Based Drone Surveillance System - Backend Server")
     print("="*60)
-    print(f"🌐 Starting server on {SERVER_CONFIG['host']}:{SERVER_CONFIG['port']}")
+    print(f"🌐 Starting server on {host}:{port}")
     print(f"📡 Video source: {VIDEO_CONFIG['source']}")
     print("="*60)
     
@@ -1424,8 +1441,8 @@ def main():
     
     # Run Flask server
     app.run(
-        host=SERVER_CONFIG["host"],
-        port=SERVER_CONFIG["port"],
+        host=host,
+        port=port,
         debug=SERVER_CONFIG["debug"],
         threaded=SERVER_CONFIG["threaded"]
     )
