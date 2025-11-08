@@ -43,6 +43,17 @@ except ImportError as e:
     DATABASE_ENABLED = False
     PDF_REPORTS_ENABLED = False
     AUTH_ENABLED = False
+    
+    # Define stub decorators when AUTH is not available
+    def role_required(role):
+        def decorator(f):
+            return f
+        return decorator
+    
+    def permission_required(permission):
+        def decorator(f):
+            return f
+        return decorator
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -328,6 +339,33 @@ def health_check():
         "geofence_enabled": GEOFENCE_ENABLED,
         "real_data_enabled": REAL_DATA_ENABLED,
         "data_mode": "REAL_DETECTIONS" if REAL_DATA_ENABLED else "MOCK_DATA"
+    })
+
+
+@app.route("/api")
+def api_info():
+    """API information endpoint"""
+    return jsonify({
+        "name": "AI-Based Drone Surveillance System API",
+        "version": "1.0.0",
+        "endpoints": {
+            "system": ["/health", "/api"],
+            "detections": ["/detections", "/alerts"],
+            "history": ["/api/history/detections", "/api/history/breaches"],
+            "analytics": ["/api/analytics", "/api/heatmap"],
+            "drones": ["/api/drones"],
+            "geofence": ["/api/geofence/alerts", "/api/geofence/zones"],
+            "video": ["/video_feed"],
+            "reports": ["/api/reports/pdf"]
+        },
+        "features": {
+            "geofence_enabled": GEOFENCE_ENABLED,
+            "real_data_enabled": REAL_DATA_ENABLED,
+            "analytics_enabled": ANALYTICS_ENABLED,
+            "database_enabled": DATABASE_ENABLED,
+            "pdf_reports_enabled": PDF_REPORTS_ENABLED,
+            "auth_enabled": AUTH_ENABLED
+        }
     })
 
 
@@ -633,6 +671,8 @@ def get_breach_history():
         total = db.get_breach_count(
             start_time=start_dt,
             end_time=end_dt,
+            zone_name=zone_name,
+            threat_level=threat_level,
             resolved=resolved_bool
         )
         

@@ -5,8 +5,9 @@ const VideoFeed = React.memo(function VideoFeed({ apiBaseUrl, fullScreen = false
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(false);
   const [key, setKey] = useState(Date.now()); // Used to force reload
+  const imgRef = React.useRef(null);
 
-  const videoUrl = `${apiBaseUrl}/video_feed`;
+  const videoUrl = `${apiBaseUrl}/video_feed?t=${key}`; // Add timestamp to prevent caching
 
   useEffect(() => {
     setIsLoading(true);
@@ -91,12 +92,16 @@ const VideoFeed = React.memo(function VideoFeed({ apiBaseUrl, fullScreen = false
 
         {!error && (
           <img
+            ref={imgRef}
             key={key}
             src={videoUrl}
             alt="Live Video Feed"
             className="max-w-full max-h-full object-contain"
             onLoad={handleImageLoad}
             onError={handleImageError}
+            loading="eager"
+            decoding="async"
+            style={{ imageRendering: 'auto' }}
           />
         )}
 

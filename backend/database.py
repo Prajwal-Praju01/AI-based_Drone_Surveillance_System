@@ -372,6 +372,8 @@ class DatabaseManager:
     def get_breach_count(self,
                         start_time: Optional[datetime] = None,
                         end_time: Optional[datetime] = None,
+                        zone_name: Optional[str] = None,
+                        threat_level: Optional[str] = None,
                         resolved: Optional[bool] = None) -> int:
         """Get total count of breaches matching filters."""
         query = "SELECT COUNT(*) as count FROM breaches WHERE 1=1"
@@ -384,6 +386,14 @@ class DatabaseManager:
         if end_time:
             query += " AND timestamp <= ?"
             params.append(end_time.isoformat())
+        
+        if zone_name:
+            query += " AND zone_name = ?"
+            params.append(zone_name)
+        
+        if threat_level:
+            query += " AND threat_level = ?"
+            params.append(threat_level)
         
         if resolved is not None:
             query += " AND resolved = ?"

@@ -30,8 +30,11 @@ class DroneInference:
         self.alerts_history = deque(maxlen=100)  # Increased for better alert tracking
         self.fps_history = deque(maxlen=30)
         self.frame_count = 0
-        self.skip_frames = 1  # Process every frame (set to 2 to skip every other frame)
+        self.skip_frames = 2  # Process every 2nd frame for better performance on CPU
         self.last_detections = []  # Cache last frame's detections
+        self.is_cpu = not torch.cuda.is_available()  # Check if running on CPU
+        self.alert_id_counter = 0  # Unique alert ID counter
+        self.recent_alerts = {}  # Track recent alerts to prevent duplicates {(zone, object_id): timestamp}
         
         self._initialize_model()
         self._initialize_tracker()
@@ -65,7 +68,15 @@ class DroneInference:
             self.model.conf = MODEL_CONFIG["conf_threshold"]
             self.model.iou = MODEL_CONFIG["iou_threshold"]
             
-            print(f"✅ Model loaded successfully")
+            # CPU optimizations
+            if not torch.cuda.is_available():
+                print("⚡ Applying CPU optimizations...")
+                # Use smaller image size for faster processing on CPU
+                self.model_img_size = 416  # Reduced from 640
+            else:
+                self.model_img_size = 640
+            
+            print(f"✅ Model loaded successfully (Image size: {self.model_img_size}px)")
         finally:
             # Restore original torch.load
             torch.load = original_load
@@ -111,8 +122,14 @@ class DroneInference:
             if hasattr(self, 'last_processed_frame'):
                 return self.last_processed_frame, self.last_detections
         
-        # Run YOLO detection
-        results = self.model(frame, verbose=False)[0]
+        # Resize frame for faster processing on CPU
+        original_frame = frame.copy()
+        if self.is_cpu and frame.shape[1] > 640:
+            scale = 640 / frame.shape[1]
+            frame = cv2.resize(frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_LINEAR)
+        
+        # Run YOLO detection with optimized image size
+        results = self.model(frame, imgsz=self.model_img_size, verbose=False)[0]
         
         # Prepare detections for tracker
         detections = []
@@ -159,24 +176,55 @@ class DroneInference:
             }
             current_frame_detections.append(detection_data)
             
-            # Generate alert if breach detected
+            # Generate alert if breach detected (with deduplication)
             if is_breach:
-                alert = {
-                    "id": len(self.alerts_history) + 1,
-                    "title": f"Zone {zone_name} Breach",
-                    "message": f"{class_name.capitalize()} detected in restricted {zone_name}",
-                    "severity": "high",
-                    "zone": zone_name,
-                    "object_class": class_name,
-                    "object_id": track_id,
-                    "timestamp": datetime.now().isoformat(),
-                    "read": False,
-                    "dismissed": False
-                }
-                self.alerts_history.append(alert)
+                # Check if we recently alerted for this object in this zone
+                alert_key = (zone_name, track_id)
+                current_time = time.time()
+                
+                # Only create alert if we haven't alerted for this object in this zone in the last 30 seconds
+                should_create_alert = True
+                if alert_key in self.recent_alerts:
+                    time_since_last_alert = current_time - self.recent_alerts[alert_key]
+                    should_create_alert = time_since_last_alert > 30.0  # 30 seconds cooldown
+                
+                if should_create_alert:
+                    self.alert_id_counter += 1
+                    alert = {
+                        "id": self.alert_id_counter,
+                        "title": f"Zone {zone_name} Breach",
+                        "message": f"{class_name.capitalize()} detected in restricted {zone_name}",
+                        "severity": "high",
+                        "zone": zone_name,
+                        "object_class": class_name,
+                        "object_id": track_id,
+                        "timestamp": datetime.now().isoformat(),
+                        "read": False,
+                        "dismissed": False
+                    }
+                    self.alerts_history.append(alert)
+                    self.recent_alerts[alert_key] = current_time
+                    
+                    # Clean up old alert tracking (remove entries older than 60 seconds)
+                    expired_keys = [
+                        key for key, timestamp in self.recent_alerts.items()
+                        if current_time - timestamp > 60.0
+                    ]
+                    for key in expired_keys:
+                        del self.recent_alerts[key]
             
-            # Draw on frame
-            self._draw_detection(frame, bbox, track_id, class_name, confidence, zone_status)
+            # Draw on frame (use original frame if resized)
+            display_frame = original_frame if self.is_cpu and original_frame.shape[1] > 640 else frame
+            
+            # Scale bbox if frame was resized
+            if self.is_cpu and original_frame.shape[1] > 640:
+                scale_factor = original_frame.shape[1] / frame.shape[1]
+                scaled_bbox = [b * scale_factor for b in bbox]
+                self._draw_detection(display_frame, scaled_bbox, track_id, class_name, confidence, zone_status)
+            else:
+                self._draw_detection(display_frame, bbox, track_id, class_name, confidence, zone_status)
+            
+            frame = display_frame
         
         # Draw zones
         self._draw_zones(frame)
@@ -277,8 +325,28 @@ class DroneInference:
         return recent_detections[:50]
     
     def get_alerts(self):
-        """Get all alerts"""
-        return list(self.alerts_history)
+        """Get all active alerts (not dismissed and from last 5 minutes)"""
+        current_time = datetime.now()
+        time_threshold = 300.0  # 5 minutes in seconds
+        
+        active_alerts = []
+        for alert in self.alerts_history:
+            # Skip dismissed alerts
+            if alert.get("dismissed", False):
+                continue
+            
+            # Check if alert is still recent (within 5 minutes)
+            try:
+                alert_time = datetime.fromisoformat(alert["timestamp"])
+                time_diff = (current_time - alert_time).total_seconds()
+                
+                if time_diff <= time_threshold:
+                    active_alerts.append(alert)
+            except (KeyError, ValueError):
+                # Include alert if timestamp is invalid (shouldn't happen)
+                active_alerts.append(alert)
+        
+        return active_alerts
     
     def run_video_stream(self):
         """Run inference on video stream"""
@@ -347,13 +415,19 @@ class DroneInference:
             print(f"⚠️ Could not open {self.video_source}, trying default camera...")
             cap = cv2.VideoCapture(0)
         
-        # FPS limiting to reduce CPU usage
-        target_fps = 15  # Process at 15 FPS instead of max speed
+        # Set camera properties for better performance
+        if not is_file:
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)  # Lower resolution
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_FPS, 15)  # Lower FPS
+        
+        # FPS limiting to reduce CPU usage (even lower for CPU)
+        target_fps = 10 if self.is_cpu else 15  # Reduced FPS for CPU
         frame_time = 1.0 / target_fps
         last_frame_time = time.time()
         
         # JPEG encoding quality (lower = faster, smaller)
-        jpeg_quality = 85
+        jpeg_quality = 70  # Reduced from 85 for faster encoding
         
         try:
             while True:

@@ -3,8 +3,20 @@ import { AlertTriangle, X, Clock, MapPin } from 'lucide-react';
 
 const AlertPanel = React.memo(function AlertPanel({ alerts, fullPage = false }) {
   const [visibleAlerts, setVisibleAlerts] = useState([]);
+  const [newAlertIds, setNewAlertIds] = useState(new Set());
 
   useEffect(() => {
+    // Check for new alerts
+    const existingIds = new Set(visibleAlerts.map(a => a.id));
+    const incomingIds = new Set(alerts.map(a => a.id));
+    const newIds = new Set([...incomingIds].filter(id => !existingIds.has(id)));
+    
+    if (newIds.size > 0) {
+      setNewAlertIds(newIds);
+      // Clear new alert indicators after 3 seconds
+      setTimeout(() => setNewAlertIds(new Set()), 3000);
+    }
+    
     setVisibleAlerts(alerts);
   }, [alerts]);
 
@@ -35,12 +47,17 @@ const AlertPanel = React.memo(function AlertPanel({ alerts, fullPage = false }) 
         <div className="flex items-center space-x-2">
           <AlertTriangle className="w-5 h-5 text-red-500" />
           <h2 className="text-lg font-bold">Active Alerts</h2>
-          {breachAlerts.length > 0 && (
-            <span className="bg-red-500 text-white text-xs font-bold rounded-full px-2 py-1">
-              {breachAlerts.length}
+          {activeAlerts.length > 0 && (
+            <span className="bg-red-500 text-white text-xs font-bold rounded-full px-2 py-1 animate-pulse">
+              {activeAlerts.length}
             </span>
           )}
         </div>
+        {activeAlerts.length > 0 && (
+          <span className="text-xs text-gray-400">
+            Last updated: {new Date().toLocaleTimeString()}
+          </span>
+        )}
       </div>
 
       {/* Alert Stats */}
@@ -77,6 +94,7 @@ const AlertPanel = React.memo(function AlertPanel({ alerts, fullPage = false }) 
               key={alert.id}
               alert={alert}
               onDismiss={handleDismiss}
+              isNew={newAlertIds.has(alert.id)}
             />
           ))
         )}
@@ -98,7 +116,7 @@ const AlertPanel = React.memo(function AlertPanel({ alerts, fullPage = false }) 
   );
 });
 
-const AlertCard = React.memo(function AlertCard({ alert, onDismiss }) {
+const AlertCard = React.memo(function AlertCard({ alert, onDismiss, isNew = false }) {
   const severityConfig = {
     high: {
       bg: 'bg-red-900/20',
@@ -124,8 +142,16 @@ const AlertCard = React.memo(function AlertCard({ alert, onDismiss }) {
 
   return (
     <div
-      className={`alert-card ${config.bg} border-2 ${config.border} rounded-lg p-4 relative`}
+      className={`alert-card ${config.bg} border-2 ${config.border} rounded-lg p-4 relative ${
+        isNew ? 'animate-pulse-slow ring-2 ring-red-500' : ''
+      }`}
     >
+      {/* New Alert Indicator */}
+      {isNew && (
+        <div className="absolute -top-2 -right-2 bg-red-500 text-white text-xs font-bold rounded-full px-2 py-1 animate-bounce">
+          NEW
+        </div>
+      )}
       {/* Dismiss Button */}
       <button
         onClick={() => onDismiss(alert.id)}

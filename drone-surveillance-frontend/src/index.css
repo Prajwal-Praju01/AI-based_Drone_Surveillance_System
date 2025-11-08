@@ -56,6 +56,17 @@
   }
 }
 
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.02);
+  }
+}
+
 .loading-shimmer {
   animation: shimmer 2s infinite;
   background: linear-gradient(
@@ -65,4 +76,8 @@
     #1e293b 36%
   );
   background-size: 1000px 100%;
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 2s ease-in-out infinite;
 }

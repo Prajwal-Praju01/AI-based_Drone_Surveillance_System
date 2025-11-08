@@ -2,7 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { MapPin, Flame, Filter, Calendar, Search } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import applyLeafletHeatPatch from '../utils/leaflet-heat-patch';
 import 'leaflet.heat';
+
+// Apply canvas performance patch before using leaflet.heat
+applyLeafletHeatPatch();
 
 const DEFAULT_CENTER = [37.7749, -122.4194]; // San Francisco
 const DEFAULT_ZOOM = 13;
@@ -13,8 +17,9 @@ const HeatmapViewer = ({ apiBaseUrl }) => {
   const [heatmapData, setHeatmapData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [dataInfo, setDataInfo] = useState({ count: 0, type: 'detections' });
   const [filters, setFilters] = useState({
-    startDate: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    startDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Last 7 days
     endDate: new Date().toISOString().split('T')[0],
     className: '',
     zoneName: '',
@@ -54,12 +59,31 @@ const HeatmapViewer = ({ apiBaseUrl }) => {
         type: filters.type,
       });
       const response = await fetch(`${apiBaseUrl}/api/heatmap?${params}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
       const data = await response.json();
-      setHeatmapData(data.points || []);
-      setTimeout(() => renderHeatmap(data.points || []), 100);
+      const points = data.points || [];
+      
+      setHeatmapData(points);
+      setDataInfo({ count: points.length, type: filters.type });
+      
+      // Render heatmap and auto-center on data
+      setTimeout(() => {
+        renderHeatmap(points);
+        if (points.length > 0) {
+          centerMapOnData(points);
+        }
+      }, 100);
+      
+      if (points.length === 0) {
+        setError(`No ${filters.type} found for the selected filters. Try expanding the date range or clearing filters.`);
+      }
     } catch (err) {
-      setError('Failed to fetch heatmap data');
-      console.error(err);
+      setError(`Failed to fetch heatmap data: ${err.message}`);
+      console.error('Heatmap fetch error:', err);
     } finally {
       setLoading(false);
     }
@@ -71,6 +95,9 @@ const HeatmapViewer = ({ apiBaseUrl }) => {
     if (heatLayerRef.current) {
       mapRef.current.removeLayer(heatLayerRef.current);
     }
+    
+    if (points.length === 0) return;
+    
     heatLayerRef.current = L.heatLayer(points, {
       radius: 25,
       blur: 15,
@@ -83,6 +110,24 @@ const HeatmapViewer = ({ apiBaseUrl }) => {
         1.0: 'red',
       },
     }).addTo(mapRef.current);
+  };
+
+  // Center map on data points
+  const centerMapOnData = (points) => {
+    if (!mapRef.current || points.length === 0) return;
+    
+    try {
+      // Calculate bounds from all points
+      const bounds = L.latLngBounds(points.map(p => [p[0], p[1]]));
+      
+      // Fit map to bounds with padding
+      mapRef.current.fitBounds(bounds, {
+        padding: [50, 50],
+        maxZoom: 15
+      });
+    } catch (err) {
+      console.error('Error centering map:', err);
+    }
   };
 
   useEffect(() => {
@@ -98,7 +143,14 @@ const HeatmapViewer = ({ apiBaseUrl }) => {
             <Flame size={28} className="text-orange-500" />
             Heatmap Visualization
           </h2>
-          <p className="text-gray-400">View detection and breach hotspots over time</p>
+          <p className="text-gray-400">
+            View {filters.type === 'detections' ? 'detection' : 'breach'} hotspots over time
+            {dataInfo.count > 0 && (
+              <span className="ml-2 text-primary-400 font-semibold">
+                ({dataInfo.count} points plotted)
+              </span>
+            )}
+          </p>
         </div>
         <div className="flex gap-2">
           <button
@@ -194,16 +246,54 @@ const HeatmapViewer = ({ apiBaseUrl }) => {
         </div>
       </div>
 
-      {/* Map Container */}
-      <div className="rounded-lg overflow-hidden border border-gray-700" style={{ height: '600px' }}>
-        <div id="heatmap-map" style={{ height: '100%', width: '100%' }}></div>
-      </div>
+      {/* Status Messages */}
       {loading && (
-        <div className="p-6 text-center text-gray-400">Loading heatmap data...</div>
+        <div className="bg-blue-900/20 border border-blue-500/50 rounded-lg p-4 text-center">
+          <div className="flex items-center justify-center gap-3">
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
+            <span className="text-blue-400">Loading heatmap data...</span>
+          </div>
+        </div>
       )}
-      {error && (
-        <div className="p-6 text-center text-red-400">{error}</div>
+      
+      {error && !loading && (
+        <div className="bg-yellow-900/20 border border-yellow-500/50 rounded-lg p-4">
+          <div className="flex items-center gap-2">
+            <span className="text-yellow-500 text-xl">⚠️</span>
+            <span className="text-yellow-400">{error}</span>
+          </div>
+        </div>
       )}
+
+      {/* Map Container */}
+      <div className="rounded-lg overflow-hidden border border-gray-700 relative" style={{ height: '600px' }}>
+        <div id="heatmap-map" style={{ height: '100%', width: '100%' }}></div>
+        
+        {/* Heatmap Legend */}
+        {heatmapData.length > 0 && (
+          <div className="absolute top-4 right-4 bg-gray-900/90 backdrop-blur-sm rounded-lg p-4 border border-gray-700 shadow-lg z-[1000]">
+            <div className="text-sm font-semibold text-white mb-2">Intensity</div>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-3 bg-gradient-to-r from-blue-500 to-blue-600 rounded"></div>
+                <span className="text-xs text-gray-300">Low</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-3 bg-gradient-to-r from-lime-500 to-lime-600 rounded"></div>
+                <span className="text-xs text-gray-300">Medium</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-3 bg-gradient-to-r from-yellow-500 to-orange-500 rounded"></div>
+                <span className="text-xs text-gray-300">High</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-3 bg-gradient-to-r from-red-500 to-red-600 rounded"></div>
+                <span className="text-xs text-gray-300">Very High</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
