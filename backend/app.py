@@ -12,36 +12,67 @@ import threading
 import os
 from werkzeug.utils import secure_filename
 
-from inference import DroneInference
 from config import SERVER_CONFIG, VIDEO_CONFIG
 
-# Import new modules
+# Configure logging first
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Import inference (optional - for video processing)
+try:
+    from inference import DroneInference
+    INFERENCE_ENABLED = True
+except ImportError as e:
+    logger.warning(f"⚠️ Inference not available: {e}")
+    INFERENCE_ENABLED = False
+    DroneInference = None
+
+# Import optional modules
 try:
     from kaggle_fetch import get_drone_data, get_drone_statistics, download_drone_dataset
+    GEOFENCE_ENABLED = True
+except ImportError as e:
+    logger.warning(f"⚠️ Kaggle modules not available: {e}")
+    GEOFENCE_ENABLED = False
+
+try:
     from geofence import check_drone_breach, get_all_zones, SAFE_ZONES
+    GEOFENCE_ENABLED = True
+except ImportError:
+    GEOFENCE_ENABLED = False
+
+try:
     from real_data_integration import get_real_drone_data
+    REAL_DATA_ENABLED = True
+except ImportError:
+    REAL_DATA_ENABLED = False
+
+try:
     from analytics import get_analytics_engine
-    from database import get_database_manager
+    ANALYTICS_ENABLED = True
+except ImportError:
+    ANALYTICS_ENABLED = False
+
+try:
     from pdf_reports import get_report_generator
+    PDF_REPORTS_ENABLED = True
+except ImportError:
+    PDF_REPORTS_ENABLED = False
+
+# Import authentication modules (CRITICAL for login)
+try:
+    from database import get_database_manager
     from auth import (
         hash_password, verify_password, init_default_users, 
         log_activity, get_user_permissions, permission_required, 
         role_required, ROLES
     )
-    GEOFENCE_ENABLED = True
-    REAL_DATA_ENABLED = True
-    ANALYTICS_ENABLED = True
     DATABASE_ENABLED = True
-    PDF_REPORTS_ENABLED = True
     AUTH_ENABLED = True
+    logger.info("✅ Authentication modules loaded successfully")
 except ImportError as e:
-    logger = logging.getLogger(__name__)
-    logger.warning(f"⚠️ Geofence modules not available: {e}")
-    GEOFENCE_ENABLED = False
-    REAL_DATA_ENABLED = False
-    ANALYTICS_ENABLED = False
+    logger.error(f"❌ Authentication modules not available: {e}")
     DATABASE_ENABLED = False
-    PDF_REPORTS_ENABLED = False
     AUTH_ENABLED = False
     
     # Define stub decorators when AUTH is not available
@@ -84,14 +115,9 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'bmp', 'mp4', 'avi', 'mov', 'mkv'}
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 # Global inference object
 inference = None
 inference_lock = threading.Lock()
-
 
 # Upload mode tracking
 upload_mode = {'enabled': False, 'current_file': None}
@@ -102,13 +128,16 @@ def allowed_file(filename):
 
 def get_inference():
     """Get or create inference object (thread-safe)"""
+    if not INFERENCE_ENABLED or DroneInference is None:
+        raise RuntimeError("Inference engine not available")
+    
     global inference
     with inference_lock:
         if inference is None:
             try:
                 logger.info("Initializing inference engine...")
                 # Use uploaded file if available, otherwise use default source
-                video_source = upload_mode.get('current_file', VIDEO_CONFIG["source"])
+                video_source = upload_mode.get('current_file', VIDEO_CONFIG.get("source", 0))
                 inference = DroneInference(video_source=video_source)
                 logger.info("✅ Inference engine initialized")
             except Exception as e:
@@ -1409,8 +1438,21 @@ def internal_error(error):
     return jsonify({"error": "Internal server error"}), 500
 
 
+# Initialize database and default users when app loads (for Gunicorn)
+if DATABASE_ENABLED and AUTH_ENABLED:
+    try:
+        db_manager = get_database_manager()
+        init_default_users(db_manager)
+        logger.info("✅ Authentication system initialized")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize authentication: {e}")
+
+# Skip inference initialization - will be lazily loaded on demand
+logger.info("⏭️ Skipping inference initialization - will initialize on demand")
+
+
 def main():
-    """Run Flask server"""
+    """Run Flask server (for local development only)"""
     # Use PORT from environment (for Render/Heroku) or default
     port = int(os.environ.get("PORT", SERVER_CONFIG["port"]))
     host = os.environ.get("HOST", SERVER_CONFIG["host"])
@@ -1420,19 +1462,6 @@ def main():
     print(f"🌐 Starting server on {host}:{port}")
     print(f"📡 Video source: {VIDEO_CONFIG['source']}")
     print("="*60)
-    
-    # Initialize database and default users
-    if DATABASE_ENABLED and AUTH_ENABLED:
-        try:
-            db_manager = get_database_manager()
-            init_default_users(db_manager)
-            print("✅ Authentication system initialized")
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize authentication: {e}")
-    
-    # Skip inference initialization on startup for production deployment
-    # Inference will be lazily initialized on first request if needed
-    logger.info("⏭️ Skipping inference initialization - will initialize on demand")
     
     # Run Flask server
     app.run(
