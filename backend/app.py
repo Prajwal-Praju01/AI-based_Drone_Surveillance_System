@@ -59,18 +59,28 @@ except ImportError as e:
 app = Flask(__name__)
 
 # CORS Configuration - Allow frontend domains
-CORS(app, resources={
-    r"/*": {
-        "origins": [
-            "http://localhost:3000",
-            "http://localhost:5173",
-            "https://*.onrender.com",  # Render deployment
-            "https://*.vercel.app",    # Vercel deployment
-        ],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-    }
-})
+def is_allowed_origin(origin):
+    """Check if origin is allowed"""
+    if not origin:
+        return False
+    
+    allowed_patterns = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        ".onrender.com",
+        ".vercel.app",
+    ]
+    
+    for pattern in allowed_patterns:
+        if pattern in origin or origin == pattern:
+            return True
+    return False
+
+CORS(app, 
+     origins=is_allowed_origin,
+     allow_headers=["Content-Type", "Authorization"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     supports_credentials=True)
 
 # JWT Configuration
 app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'your-secret-key-change-in-production')
