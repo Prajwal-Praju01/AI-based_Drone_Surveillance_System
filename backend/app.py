@@ -89,13 +89,8 @@ except ImportError as e:
 # Initialize Flask app
 app = Flask(__name__)
 
-# CORS Configuration - Allow all Render domains dynamically
-CORS(app, 
-     resources={r"/*": {"origins": "*"}},
-     allow_headers=["Content-Type", "Authorization"],
-     expose_headers=["Content-Type", "Authorization"],
-     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-     supports_credentials=False)
+# CORS Configuration - Allow all origins (simplified for deployment)
+CORS(app, origins="*", supports_credentials=False)
 
 # JWT Configuration
 app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'your-secret-key-change-in-production')
