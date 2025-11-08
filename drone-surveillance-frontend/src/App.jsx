@@ -13,8 +13,8 @@ import HeatmapViewer from './components/HeatmapViewer';
 import Login from './components/Login';
 import { GeofenceAlerts, DatasetInfo } from './components/GeofenceComponents';
 
-// Base URL for API - change this to match your backend
-const API_BASE_URL = 'http://localhost:5000';
+// Base URL for API - uses environment variable or defaults to localhost
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 function App() {
   const [detections, setDetections] = useState([]);
