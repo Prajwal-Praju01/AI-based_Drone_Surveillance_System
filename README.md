@@ -380,3 +380,4 @@ This is a complete production-ready system. Feel free to:
 **Built with ❤️ using YOLOv8, DeepSORT, React, and Tailwind CSS**
 
 **Ready for production deployment! 🚀**
+/LIKHITH GOWDA L
